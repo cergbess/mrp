@@ -1,6 +1,9 @@
 package App;
 
+import DAL.OrdersDAO;
 import DAL.WarehouseDAO;
+import Models.ExtendedEdge;
+import Models.Order;
 import Models.Warehouse;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -10,11 +13,9 @@ import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
+
 import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY;
@@ -22,7 +23,11 @@ import static javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY;
 public class WarehouseWindow {
 
     private WarehouseDAO warehouseDAO = new WarehouseDAO();
+
+    private OrdersDAO orderDAO = new OrdersDAO();
+
     private TableView<Warehouse> tableView;
+    ComponentsWindow componentsWindow = new ComponentsWindow();
 
     public void openWarehouseWindow(List<Warehouse> warehouseEntries) {
         Stage newStage = new Stage();
@@ -80,9 +85,10 @@ public class WarehouseWindow {
         Button update = createUpdateButton();
         Button delete = createDeleteButton();
         Button closeButton = createCloseButton();
-        Button getCount = createGetCountButton();
+        Button getCount = createChooseDateButton();
+        Button differenceButton = createDifferenceButton();
 
-        buttonsBox.getChildren().addAll(create, getByNodeId, update, delete, getCount,closeButton);
+        buttonsBox.getChildren().addAll(create, getByNodeId, update, delete, getCount, differenceButton, closeButton);
         return buttonsBox;
     }
 
@@ -318,54 +324,249 @@ public class WarehouseWindow {
         alert.showAndWait();
     }
 
-    private Button createGetCountButton() {
-        Button getCount = new Button("Get Count");
-        getCount.setOnAction(e -> getCountAction());
-        return getCount;
+    private Button createChooseDateButton() {
+        Button chooseDate = new Button("Components");
+        chooseDate.setOnAction(e -> openDateSelectionWindow());
+        return chooseDate;
     }
 
-    private void getCountAction() {
-        Dialog<Integer> dialog = new Dialog<>();
-        dialog.setTitle("Get Count");
-        dialog.setHeaderText("Введите параметры для подсчёта");
-
-        ButtonType buttonTypeOK = new ButtonType("OK", ButtonBar.ButtonData.OK_DONE);
-        dialog.getDialogPane().getButtonTypes().addAll(buttonTypeOK, ButtonType.CANCEL);
-
-        GridPane grid = new GridPane();
-        grid.setHgap(10);
-        grid.setVgap(10);
-
-        TextField nodeIdInput = new TextField();
+    private void openDateSelectionWindow() {
         DatePicker datePicker = new DatePicker();
 
-        grid.add(new Label("ID узла:"), 0, 0);
-        grid.add(nodeIdInput, 1, 0);
-        grid.add(new Label("Дата:"), 0, 1);
-        grid.add(datePicker, 1, 1);
+        Button confirmButton = new Button("Подтвердить");
+        confirmButton.setOnAction(event -> {
+            LocalDate selectedDate = datePicker.getValue();
 
-        dialog.getDialogPane().setContent(grid);
+            if (selectedDate != null) {
+                List<Warehouse> warehouses = warehouseDAO.getCountsByDate(selectedDate);
+                List<ExtendedEdge> edges = new ArrayList<>();
 
-        dialog.setResultConverter(dialogButton -> {
-            if (dialogButton == buttonTypeOK) {
-                try {
-                    int nodeId = Integer.parseInt(nodeIdInput.getText());
-                    LocalDate date = datePicker.getValue();
-                    if (date == null) {
-                        showAlert(Alert.AlertType.WARNING, "Предупреждение", "Дата не выбрана", "Пожалуйста, выберите дату для продолжения.");
-                        return null;
+                for (Warehouse warehouse : warehouses) {
+                    int receivedQuantity = warehouse.getReceivedQuantity();
+                    int shippedQuantity = warehouse.getShippedQuantity();
+
+                    List<ExtendedEdge> lowerNodes = componentsWindow.getAllLowerNodes(warehouse.getNodeId());
+
+                    for (ExtendedEdge edge : lowerNodes) {
+                        edge.setWeight(edge.getWeight() * (receivedQuantity - shippedQuantity));
                     }
-                    int count = warehouseDAO.getCountByParameters(nodeId, date);
-
-                    showAlert(Alert.AlertType.INFORMATION, "Результат подсчёта", "Количество на складе", "Количество: " + count);
-
-                } catch (NumberFormatException e) {
-                    showErrorAlert("Ошибка", "Некорректные данные", "Пожалуйста, введите корректные данные для подсчёта.");
+                    edges.addAll(lowerNodes);
                 }
+                showEdgesInTableView(edges);
+
+                Stage stage = (Stage) confirmButton.getScene().getWindow();
+                stage.close();
+            } else {
+                showAlert(Alert.AlertType.INFORMATION,"Ошибка", "Выберите дату", "Пожалуйста, выберите дату.");
             }
-            return null;
         });
 
-        dialog.showAndWait();
+        VBox layout = new VBox(10);
+        layout.getChildren().addAll(new Label("Выберите дату:"), datePicker, confirmButton);
+        layout.setAlignment(Pos.CENTER);
+
+        Stage stage = new Stage();
+        stage.setTitle("Выбор даты");
+        stage.setScene(new Scene(layout));
+        stage.show();
+    }
+
+    private void showEdgesInTableView(List<ExtendedEdge> edges) {
+        TableView<ExtendedEdge> tableView = new TableView<>();
+        TableColumn<ExtendedEdge, String> nameColumn = new TableColumn<>("Номер компонента");
+        nameColumn.setCellValueFactory(new PropertyValueFactory<>("lowerNodeName"));
+        TableColumn<ExtendedEdge, Double> weightColumn = new TableColumn<>("Количество");
+        weightColumn.setCellValueFactory(new PropertyValueFactory<>("weight"));
+        TableColumn<ExtendedEdge, String> nodeNameColumn = new TableColumn<>("Имя узла");
+        nodeNameColumn.setCellValueFactory(new PropertyValueFactory<>("nodeName"));
+        TableColumn<ExtendedEdge, String> nodeDescColumn = new TableColumn<>("Описание узла");
+        nodeDescColumn.setCellValueFactory(new PropertyValueFactory<>("nodeDescription"));
+        tableView.getColumns().addAll(nameColumn, weightColumn, nodeNameColumn, nodeDescColumn);
+        tableView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        tableView.setItems(FXCollections.observableArrayList(edges));
+
+        Button mergeButton = new Button("Сложить веса");
+        mergeButton.setOnAction(event -> mergeRecords(tableView));
+
+        Button closeButton = new Button("Выход");
+        closeButton.setOnAction(event -> {
+            Stage stage = (Stage) closeButton.getScene().getWindow();
+            stage.close();
+        });
+
+        HBox buttonBox = new HBox(10);
+        buttonBox.getChildren().addAll(mergeButton, closeButton);
+        buttonBox.setAlignment(Pos.CENTER);
+
+        VBox layout = new VBox(10);
+        layout.getChildren().addAll(tableView, buttonBox);
+        layout.setAlignment(Pos.CENTER);
+
+        Stage stage = new Stage();
+        stage.setTitle("Результаты");
+        stage.setScene(new Scene(layout, 600, 400));
+        stage.show();
+
+    }
+
+    private void mergeRecords(TableView<ExtendedEdge> tableView) {
+        ObservableList<ExtendedEdge> items = tableView.getItems();
+
+        Map<Integer, ExtendedEdge> mergedMap = new HashMap<>();
+        for (ExtendedEdge edge : items) {
+            int lowerNodeName = edge.getLowerNodeName();
+            if (mergedMap.containsKey(lowerNodeName)) {
+                ExtendedEdge existingEdge = mergedMap.get(lowerNodeName);
+                int newWeight = existingEdge.getWeight() + edge.getWeight();
+                existingEdge.setWeight(newWeight);
+            } else {
+                mergedMap.put(lowerNodeName, edge);
+            }
+        }
+
+        tableView.getItems().setAll(mergedMap.values());
+        showAlert(Alert.AlertType.INFORMATION,"Информация",null,"Записи объединены и веса сложены.");
+    }
+
+    private Button createDifferenceButton() {
+        Button chooseDate = new Button("Difference");
+        chooseDate.setOnAction(e -> openDidderenceWindow());
+        return chooseDate;
+    }
+
+    private void openDidderenceWindow() {
+        DatePicker datePicker = new DatePicker();
+
+        Button confirmButton = new Button("Подтвердить");
+        confirmButton.setOnAction(event -> {
+            LocalDate selectedDate = datePicker.getValue();
+
+            if (selectedDate != null) {
+                List<Warehouse> warehouses = warehouseDAO.getCountsByDate(selectedDate);
+
+                Map<Integer, ExtendedEdge> mergedMap1 = new HashMap<>();
+
+                for (Warehouse warehouse : warehouses) {
+                    int receivedQuantity = warehouse.getReceivedQuantity();
+                    int shippedQuantity = warehouse.getShippedQuantity();
+
+                    List<ExtendedEdge> lowerNodes = componentsWindow.getAllLowerNodes(warehouse.getNodeId());
+
+                    for (ExtendedEdge edge : lowerNodes) {
+                        edge.setWeight(edge.getWeight() * (receivedQuantity - shippedQuantity));
+                    }
+
+                    for (ExtendedEdge edge : lowerNodes) {
+                        int lowerNodeName = edge.getLowerNodeName();
+                        if (mergedMap1.containsKey(lowerNodeName)) {
+                            ExtendedEdge existingEdge = mergedMap1.get(lowerNodeName);
+                            int newWeight = existingEdge.getWeight() + edge.getWeight();
+                            existingEdge.setWeight(newWeight);
+                        } else {
+                            mergedMap1.put(lowerNodeName, edge);
+                        }
+                    }
+                }
+
+                List<Order> orders = orderDAO.getOrdersByDate(selectedDate);
+
+                Map<Integer, ExtendedEdge> mergedMap2 = new HashMap<>();
+
+                for (Order order : orders) {
+                    int quantityOrdered = order.getQuantityOrdered();
+
+                    List<ExtendedEdge> lowerNodes = componentsWindow.getAllLowerNodes(order.getNodeId());
+
+                    for (ExtendedEdge edge : lowerNodes) {
+                        edge.setWeight(edge.getWeight() * quantityOrdered);
+                    }
+
+                    for (ExtendedEdge edge : lowerNodes) {
+                        int lowerNodeName = edge.getLowerNodeName();
+                        if (mergedMap2.containsKey(lowerNodeName)) {
+                            ExtendedEdge existingEdge = mergedMap2.get(lowerNodeName);
+                            int newWeight = existingEdge.getWeight() + edge.getWeight();
+                            existingEdge.setWeight(newWeight);
+                        } else {
+                            mergedMap2.put(lowerNodeName, edge);
+                        }
+                    }
+                }
+
+                Map<Integer, ExtendedEdge> differenceMap = new HashMap<>();
+
+                for (ExtendedEdge edge : mergedMap1.values()) {
+                    int nodeId = edge.getLowerNodeName();
+                    if (mergedMap2.containsKey(nodeId)) {
+                        ExtendedEdge demandEdge = mergedMap2.get(nodeId);
+                        int newWeight = edge.getWeight() - demandEdge.getWeight();
+                        edge.setWeight(newWeight);
+                    }
+                    if (edge.getWeight() < 0) {
+                        edge.setWeight(-edge.getWeight());
+                    }
+                    differenceMap.put(nodeId, edge);
+                }
+
+                List<ExtendedEdge> differences = new ArrayList<>(differenceMap.values());
+
+                List<ExtendedEdge> negativeDifferences = differences.stream()
+                        .filter(edge -> edge.getWeight() > 0)
+                        .collect(Collectors.toList());
+
+                showDifferenceWindow(negativeDifferences);
+
+                Stage stage = (Stage) confirmButton.getScene().getWindow();
+                stage.close();
+            } else {
+                showAlert(Alert.AlertType.INFORMATION,"Ошибка", "Выберите дату", "Пожалуйста, выберите дату.");
+            }
+        });
+
+        VBox layout = new VBox(10);
+        layout.getChildren().addAll(new Label("Выберите дату:"), datePicker, confirmButton);
+        layout.setAlignment(Pos.CENTER);
+
+        Stage stage = new Stage();
+        stage.setTitle("Выбор даты");
+        stage.setScene(new Scene(layout));
+        stage.show();
+    }
+
+    private void showDifferenceWindow(List<ExtendedEdge> edges) {
+        TableView<ExtendedEdge> tableView = new TableView<>();
+        TableColumn<ExtendedEdge, String> nameColumn = new TableColumn<>("Номер компонента");
+        nameColumn.setCellValueFactory(new PropertyValueFactory<>("lowerNodeName"));
+        TableColumn<ExtendedEdge, Double> weightColumn = new TableColumn<>("Недостает");
+        weightColumn.setCellValueFactory(new PropertyValueFactory<>("weight"));
+        TableColumn<ExtendedEdge, String> nodeNameColumn = new TableColumn<>("Имя компонента");
+        nodeNameColumn.setCellValueFactory(new PropertyValueFactory<>("nodeName"));
+        TableColumn<ExtendedEdge, String> nodeDescColumn = new TableColumn<>("Описание компонента");
+        nodeDescColumn.setCellValueFactory(new PropertyValueFactory<>("nodeDescription"));
+        tableView.getColumns().addAll(nameColumn, weightColumn, nodeNameColumn, nodeDescColumn);
+        tableView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        tableView.setItems(FXCollections.observableArrayList(edges));
+
+        Button closeButton = new Button("Выход");
+        closeButton.setOnAction(event -> {
+            Stage stage = (Stage) closeButton.getScene().getWindow();
+            stage.close();
+        });
+
+        HBox buttonBox = new HBox(10);
+        buttonBox.getChildren().addAll(closeButton);
+        buttonBox.setAlignment(Pos.CENTER);
+
+        VBox layout = new VBox(10);
+        layout.getChildren().addAll(tableView, buttonBox);
+        layout.setAlignment(Pos.CENTER);
+
+        Stage stage = new Stage();
+        stage.setTitle("Результаты");
+        stage.setScene(new Scene(layout, 600, 400));
+        stage.show();
+
     }
 }

@@ -2,11 +2,8 @@ package DAL;
 
 import Models.Order;
 import javafx.scene.control.Alert;
-import java.sql.Connection;
-import java.sql.Date;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+
+import java.sql.*;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -133,5 +130,33 @@ public class OrdersDAO {
             e.printStackTrace();
         }
         return false;
+    }
+
+    public List<Order> getOrdersByDate(LocalDate date) {
+        List<Order> orders = new ArrayList<>();
+
+        try (Connection connection = DatabaseConnector.getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT * FROM orders WHERE orderDate <= ?")) {
+
+            statement.setDate(1, Date.valueOf(date));
+
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    int id = resultSet.getInt("id");
+                    int nodeId = resultSet.getInt("nodeId");
+                    LocalDate orderDate = resultSet.getDate("orderDate").toLocalDate();
+                    int quantityOrdered = resultSet.getInt("quantityOrdered");
+                    String description = resultSet.getString("description");
+                    String supplier = resultSet.getString("supplier");
+                    double price = resultSet.getDouble("price");
+
+                    Order order = new Order(id, nodeId, orderDate, quantityOrdered, description, supplier, price);
+                    orders.add(order);
+                }
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return orders;
     }
 }

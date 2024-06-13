@@ -55,7 +55,13 @@ public class ComponentsWindow {
         Button mergeButton = new Button("Объединить записи");
         mergeButton.setOnAction(event -> mergeRecords(tableView));
 
-        HBox buttonBox = new HBox(getComponentsButton, mergeButton);
+        Button closeButton = new Button("Выход");
+        closeButton.setOnAction(event -> {
+            Stage stage = (Stage) closeButton.getScene().getWindow();
+            stage.close();
+        });
+
+        HBox buttonBox = new HBox(getComponentsButton, mergeButton, closeButton);
         buttonBox.setAlignment(Pos.CENTER);
         buttonBox.setSpacing(10);
 
@@ -71,7 +77,7 @@ public class ComponentsWindow {
         newStage.show();
     }
 
-    private List<ExtendedEdge> getAllLowerNodes(int startingNode) {
+    List<ExtendedEdge> getAllLowerNodes(int startingNode) {
         allNodesList = new ArrayList<>();
         Set<ExtendedEdge> outerEdgesSet = new HashSet<>();
         List<ExtendedEdge> outerEdges = getOuterEdgesForNode(startingNode);
@@ -107,6 +113,10 @@ public class ComponentsWindow {
                 }
             }
         }
+        if (outerEdges.isEmpty()) {
+            ExtendedEdge newEdge = new ExtendedEdge(node, node, 1, "", "");
+            outerEdges.add(newEdge);
+        }
 
         return outerEdges;
     }
@@ -126,6 +136,7 @@ public class ComponentsWindow {
                 }
             }
         }
+
 
         if (isOuterNode) {
             PathInfo pathInfo = new PathInfo();
@@ -161,5 +172,6 @@ public class ComponentsWindow {
         alert.setHeaderText(null);
         alert.showAndWait();
     }
+
 }
 

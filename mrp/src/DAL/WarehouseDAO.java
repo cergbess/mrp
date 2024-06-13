@@ -9,7 +9,9 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class WarehouseDAO {
 
@@ -118,23 +120,29 @@ public class WarehouseDAO {
         return false;
     }
 
-    public int getCountByParameters(int nodeId, LocalDate date) {
-        int count = 0;
+    public List<Warehouse> getCountsByDate(LocalDate date) {
+        List<Warehouse> warehouseRecords = new ArrayList<>();
+
         try (Connection connection = DatabaseConnector.getConnection();
-             PreparedStatement statement = connection.prepareStatement("SELECT SUM(receivedQuantity) - SUM(shippedQuantity)" +
-                     " FROM warehouse WHERE nodeId = ? AND date <= ?");
-        ) {
-            statement.setInt(1, nodeId);
-            statement.setDate(2, Date.valueOf(date));
+             PreparedStatement statement = connection.prepareStatement("SELECT * FROM warehouse WHERE DATE(date) <= ?")) {
+
+            statement.setDate(1, Date.valueOf(date));
 
             try (ResultSet resultSet = statement.executeQuery()) {
-                if (resultSet.next()) {
-                    count = resultSet.getInt(1);
+                while (resultSet.next()) {
+                    int id = resultSet.getInt("id");
+                    int nodeId = resultSet.getInt("nodeId");
+                    int receivedQuantity = resultSet.getInt("receivedQuantity");
+                    int shippedQuantity = resultSet.getInt("shippedQuantity");
+                    LocalDate recordDate = resultSet.getDate("date").toLocalDate();
+
+                    Warehouse warehouseRecord = new Warehouse(id, nodeId, receivedQuantity, shippedQuantity, recordDate);
+                    warehouseRecords.add(warehouseRecord);
                 }
             }
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        return count;
+        return warehouseRecords;
     }
 }

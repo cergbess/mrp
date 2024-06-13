@@ -1,7 +1,11 @@
 package App;
 
+import DAL.EdgesDAO;
 import DAL.OrdersDAO;
+import Models.Edge;
+import Models.ExtendedEdge;
 import Models.Order;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Pos;
@@ -11,9 +15,7 @@ import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY;
@@ -21,6 +23,7 @@ import static javafx.scene.control.TableView.CONSTRAINED_RESIZE_POLICY;
 public class OrdersWindow {
 
     private OrdersDAO ordersDAO = new OrdersDAO();
+    ComponentsWindow componentsWindow = new ComponentsWindow();
     private TableView<Order> tableView;
 
     public void openOrdersWindow(List<Order> orders) {
@@ -85,9 +88,10 @@ public class OrdersWindow {
         Button getByNodeId = createGetByNodeIdButton();
         Button update = createUpdateButton();
         Button delete = createDeleteButton();
+        Button chooseDate = createChooseDateButton();
         Button closeButton = createCloseButton();
 
-        buttonsBox.getChildren().addAll(create, getByNodeId, update, delete, closeButton);
+        buttonsBox.getChildren().addAll(create, getByNodeId, update, delete, chooseDate, closeButton);
         return buttonsBox;
     }
 
@@ -344,5 +348,108 @@ public class OrdersWindow {
         alert.setHeaderText(header);
         alert.setContentText(content);
         alert.showAndWait();
+    }
+
+    private Button createChooseDateButton() {
+        Button chooseDate = new Button("Components");
+        chooseDate.setOnAction(e -> openDateSelectionWindow());
+        return chooseDate;
+    }
+    private void openDateSelectionWindow() {
+        DatePicker datePicker = new DatePicker();
+
+        Button confirmButton = new Button("Подтвердить");
+        confirmButton.setOnAction(event -> {
+            LocalDate selectedDate = datePicker.getValue();
+
+            if (selectedDate != null) {
+                List<Order> orders = ordersDAO.getOrdersByDate(selectedDate);
+                List<ExtendedEdge> edges = new ArrayList<>();
+
+                for (Order order : orders) {
+                    int quantityOrdered = order.getQuantityOrdered();
+
+                    List<ExtendedEdge> lowerNodes = componentsWindow.getAllLowerNodes(order.getNodeId());
+
+                    for (ExtendedEdge edge : lowerNodes) {
+                        edge.setWeight(edge.getWeight() * quantityOrdered);
+                    }
+                    edges.addAll(lowerNodes);
+                }
+                showEdgesInTableView(edges);
+
+                Stage stage = (Stage) confirmButton.getScene().getWindow();
+                stage.close();
+            } else {
+                showAlert(Alert.AlertType.INFORMATION,"Ошибка", "Выберите дату", "Пожалуйста, выберите дату.");
+            }
+        });
+
+        VBox layout = new VBox(10);
+        layout.getChildren().addAll(new Label("Выберите дату:"), datePicker, confirmButton);
+        layout.setAlignment(Pos.CENTER);
+
+        Stage stage = new Stage();
+        stage.setTitle("Выбор даты");
+        stage.setScene(new Scene(layout));
+        stage.show();
+    }
+
+    private void showEdgesInTableView(List<ExtendedEdge> edges) {
+        TableView<ExtendedEdge> tableView = new TableView<>();
+        TableColumn<ExtendedEdge, String> nameColumn = new TableColumn<>("Номер компонента");
+        nameColumn.setCellValueFactory(new PropertyValueFactory<>("lowerNodeName"));
+        TableColumn<ExtendedEdge, Double> weightColumn = new TableColumn<>("Количество");
+        weightColumn.setCellValueFactory(new PropertyValueFactory<>("weight"));
+        TableColumn<ExtendedEdge, String> nodeNameColumn = new TableColumn<>("Имя узла");
+        nodeNameColumn.setCellValueFactory(new PropertyValueFactory<>("nodeName"));
+        TableColumn<ExtendedEdge, String> nodeDescColumn = new TableColumn<>("Описание узла");
+        nodeDescColumn.setCellValueFactory(new PropertyValueFactory<>("nodeDescription"));
+        tableView.getColumns().addAll(nameColumn, weightColumn, nodeNameColumn, nodeDescColumn);
+        tableView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        tableView.setItems(FXCollections.observableArrayList(edges));
+
+        Button mergeButton = new Button("Сложить веса");
+        mergeButton.setOnAction(event -> mergeRecords(tableView));
+
+        Button closeButton = new Button("Выход");
+        closeButton.setOnAction(event -> {
+            Stage stage = (Stage) closeButton.getScene().getWindow();
+            stage.close();
+        });
+
+        HBox buttonBox = new HBox(10);
+        buttonBox.getChildren().addAll(mergeButton, closeButton);
+        buttonBox.setAlignment(Pos.CENTER);
+
+        VBox layout = new VBox(10);
+        layout.getChildren().addAll(tableView, buttonBox);
+        layout.setAlignment(Pos.CENTER);
+
+        Stage stage = new Stage();
+        stage.setTitle("Результаты");
+        stage.setScene(new Scene(layout, 600, 400));
+        stage.show();
+
+    }
+
+    private void mergeRecords(TableView<ExtendedEdge> tableView) {
+        ObservableList<ExtendedEdge> items = tableView.getItems();
+
+        Map<Integer, ExtendedEdge> mergedMap = new HashMap<>();
+        for (ExtendedEdge edge : items) {
+            int lowerNodeName = edge.getLowerNodeName();
+            if (mergedMap.containsKey(lowerNodeName)) {
+                ExtendedEdge existingEdge = mergedMap.get(lowerNodeName);
+                int newWeight = existingEdge.getWeight() + edge.getWeight();
+                existingEdge.setWeight(newWeight);
+            } else {
+                mergedMap.put(lowerNodeName, edge);
+            }
+        }
+
+        tableView.getItems().setAll(mergedMap.values());
+        showAlert(Alert.AlertType.INFORMATION,"Информация",null,"Записи объединены и веса сложены.");
     }
 }
